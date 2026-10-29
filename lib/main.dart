@@ -1,8 +1,13 @@
 import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'auth_gate.dart';
 import 'course.dart';
 import 'course_screen.dart';
+import 'firebase_options.dart';
 import 'weather.dart';
 
 const dayNames = {
@@ -13,7 +18,11 @@ const dayNames = {
   'Fri': 'Friday',
 };
 
-void main() => runApp(const MyWeekApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: kIsWeb ? webFirebaseOptions : null);
+  runApp(const MyWeekApp());
+}
 
 class MyWeekApp extends StatelessWidget {
   const MyWeekApp({super.key});
@@ -24,7 +33,7 @@ class MyWeekApp extends StatelessWidget {
       title: 'My Week',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.teal),
-      home: const WeekScreen(),
+      home: const AuthGate(),
     );
   }
 }
@@ -109,7 +118,6 @@ class _WeekScreenState extends State<WeekScreen> {
 
   // ---------- Courses ----------
 
-  // Courses of one day, sorted by start time
   List<Course> coursesOn(String day) {
     final list = courses.where((c) => c.day == day).toList();
     list.sort((a, b) => a.start.compareTo(b.start));
@@ -221,7 +229,16 @@ class _WeekScreenState extends State<WeekScreen> {
     final today = coursesOn(selectedDay);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('📅 My Week')),
+      appBar: AppBar(
+        title: const Text('📅 My Week'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Log out',
+            onPressed: () => FirebaseAuth.instance.signOut(),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: openAdd,
         child: const Icon(Icons.add),
