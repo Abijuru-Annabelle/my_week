@@ -1,9 +1,8 @@
-import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_gate.dart';
 import 'course.dart';
 import 'course_screen.dart';
@@ -48,13 +47,10 @@ class WeekScreen extends StatefulWidget {
 class _WeekScreenState extends State<WeekScreen> {
   String selectedDay = 'Mon';
 
-  final List<Course> courses = [
-    Course(name: 'Mobile Programming', day: 'Mon', start: 480, end: 600),
-    Course(name: 'Java', day: 'Mon', start: 600, end: 690),
-    Course(name: 'Operating Systems', day: 'Tue', start: 540, end: 660),
-    Course(name: 'Physics', day: 'Tue', start: 630, end: 720),
-    Course(name: 'Web Technology', day: 'Thu', start: 840, end: 960),
-  ];
+  // Listens to Firestore: the courses now, and again after every change.
+  // Created once, so tapping a day chip does not restart it.
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> coursesStream =
+  myCourses().orderBy('start').snapshots();
 
   // Weather: the three states
   Weather? weather;
@@ -64,30 +60,7 @@ class _WeekScreenState extends State<WeekScreen> {
   @override
   void initState() {
     super.initState();
-    loadCourses();
     loadWeather();
-  }
-
-  // ---------- Saving on the phone ----------
-
-  Future<void> saveCourses() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = courses.map((c) => c.toJson()).toList();
-    await prefs.setString('courses', jsonEncode(list));
-  }
-
-  Future<void> loadCourses() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('courses');
-    if (saved != null) {
-      final list = jsonDecode(saved) as List;
-      setState(() {
-        courses.clear();
-        courses.addAll(
-          list.map((x) => Course.fromJson(x as Map<String, dynamic>)),
-        );
-      });
-    }
   }
 
   // ---------- Live weather from the API ----------
@@ -116,13 +89,7 @@ class _WeekScreenState extends State<WeekScreen> {
     loadWeather();
   }
 
-  // ---------- Courses ----------
-
-  List<Course> coursesOn(String day) {
-    final list = courses.where((c) => c.day == day).toList();
-    list.sort((a, b) => a.start.compareTo(b.start));
-    return list;
-  }
+  // ---------- Computed from the courses, never saved ----------
 
   int totalMinutes(List<Course> list) {
     int total = 0;
@@ -132,22 +99,17 @@ class _WeekScreenState extends State<WeekScreen> {
     return total;
   }
 
-  List<String> clashNames(Course course) {
-    return courses.where((o) => clashes(course, o)).map((o) => o.name).toList();
+  List<String> clashNames(Course course, List<Course> all) {
+    return all.where((o) => clashes(course, o)).map((o) => o.name).toList();
   }
+
+  // ---------- Add, edit, delete ----------
 
   void openAdd() {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => CourseScreen(day: selectedDay)),
-    ).then((result) {
-      if (result != null) {
-        setState(() {
-          courses.add(result);
-        });
-        saveCourses();
-      }
-    });
+    );
   }
 
   void openEdit(Course course) {
@@ -155,38 +117,32 @@ class _WeekScreenState extends State<WeekScreen> {
       context,
       MaterialPageRoute(
           builder: (_) => CourseScreen(course: course, day: course.day)),
-    ).then((_) {
-      setState(() {});
-      saveCourses();
-    });
-  }
-
-  void confirmDelete(Course course) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('Delete ${course.name}?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                setState(() {
-                  courses.remove(course);
-                });
-                saveCourses();
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
     );
   }
+
+  Future<void> confirmDelete(Course course) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${course.name}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (sure == true) {
+      await myCourses().doc(course.id).delete();
+    }
+  }
+
+  // ---------- Screens ----------
 
   Widget buildWeather() {
     if (weatherLoading) {
@@ -224,10 +180,83 @@ class _WeekScreenState extends State<WeekScreen> {
     );
   }
 
+  Widget buildCourses(List<Course> courses) {
+    // Empty state: a new user with no courses yet
+    if (courses.isEmpty) {
+      return const Center(
+        child: Text(
+          'No courses yet.\nTap + to add your first course.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 16),
+        ),
+      );
+    }
+
+    final today = courses.where((c) => c.day == selectedDay).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Week total: ${formatDuration(totalMinutes(courses))}',
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          children: days.map((d) {
+            return ChoiceChip(
+              label: Text(d),
+              selected: selectedDay == d,
+              onSelected: (_) => setState(() => selectedDay = d),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '${dayNames[selectedDay]}: ${formatDuration(totalMinutes(today))}',
+          style: const TextStyle(fontSize: 16),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: today.isEmpty
+              ? Center(child: Text('No classes on ${dayNames[selectedDay]}'))
+              : ListView.builder(
+            itemCount: today.length,
+            itemBuilder: (context, index) {
+              final c = today[index];
+              final clashList = clashNames(c, courses);
+              final hasClash = clashList.isNotEmpty;
+              return Card(
+                color: hasClash ? Colors.red.shade100 : null,
+                child: ListTile(
+                  leading: Icon(
+                    hasClash ? Icons.warning : Icons.book,
+                    color: hasClash ? Colors.red : Colors.teal,
+                  ),
+                  title: Text(c.name),
+                  subtitle: Text(
+                    '${formatTime(c.start)} – ${formatTime(c.end)}'
+                        '${hasClash ? '\nClashes with ${clashList.join(', ')}' : ''}',
+                    style:
+                    TextStyle(color: hasClash ? Colors.red : null),
+                  ),
+                  onTap: () => openEdit(c),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete),
+                    onPressed: () => confirmDelete(c),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final today = coursesOn(selectedDay);
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('📅 My Week'),
@@ -250,57 +279,27 @@ class _WeekScreenState extends State<WeekScreen> {
           children: [
             buildWeather(),
             const SizedBox(height: 12),
-            Text(
-              'Week total: ${formatDuration(totalMinutes(courses))}',
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              children: days.map((d) {
-                return ChoiceChip(
-                  label: Text(d),
-                  selected: selectedDay == d,
-                  onSelected: (_) => setState(() => selectedDay = d),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '${dayNames[selectedDay]}: ${formatDuration(totalMinutes(today))}',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 8),
             Expanded(
-              child: today.isEmpty
-                  ? Center(child: Text('No classes on ${dayNames[selectedDay]}'))
-                  : ListView.builder(
-                itemCount: today.length,
-                itemBuilder: (context, index) {
-                  final c = today[index];
-                  final clashList = clashNames(c);
-                  final hasClash = clashList.isNotEmpty;
-                  return Card(
-                    color: hasClash ? Colors.red.shade100 : null,
-                    child: ListTile(
-                      leading: Icon(
-                        hasClash ? Icons.warning : Icons.book,
-                        color: hasClash ? Colors.red : Colors.teal,
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: coursesStream,
+                builder: (context, snapshot) {
+                  // Error state, e.g. the rules refused
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Text(
+                        'Could not load your courses.\n${snapshot.error}',
+                        textAlign: TextAlign.center,
                       ),
-                      title: Text(c.name),
-                      subtitle: Text(
-                        '${formatTime(c.start)} – ${formatTime(c.end)}'
-                            '${hasClash ? '\nClashes with ${clashList.join(', ')}' : ''}',
-                        style: TextStyle(
-                            color: hasClash ? Colors.red : null),
-                      ),
-                      onTap: () => openEdit(c),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete),
-                        onPressed: () => confirmDelete(c),
-                      ),
-                    ),
-                  );
+                    );
+                  }
+                  // Loading state
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  // Data: every document becomes a Course
+                  final courses =
+                  snapshot.data!.docs.map(Course.fromDoc).toList();
+                  return buildCourses(courses);
                 },
               ),
             ),

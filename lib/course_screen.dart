@@ -18,6 +18,7 @@ class _CourseScreenState extends State<CourseScreen> {
   final startController = TextEditingController();
   final endController = TextEditingController();
   late String day;
+  bool saving = false;
 
   @override
   void initState() {
@@ -36,7 +37,7 @@ class _CourseScreenState extends State<CourseScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void save() {
+  Future<void> save() async {
     final name = nameController.text.trim();
     final start = parseTime(startController.text);
     final end = parseTime(endController.text);
@@ -58,18 +59,21 @@ class _CourseScreenState extends State<CourseScreen> {
       return;
     }
 
-    final c = widget.course;
-    if (c != null) {
-      c.name = name;
-      c.day = day;
-      c.start = start;
-      c.end = end;
-      Navigator.pop(context);
-    } else {
-      Navigator.pop(
-        context,
-        Course(name: name, day: day, start: start, end: end),
-      );
+    final data =
+    Course(name: name, day: day, start: start, end: end).toMap();
+
+    setState(() => saving = true);
+    try {
+      if (widget.course == null) {
+        await myCourses().add(data); // new document, random id
+      } else {
+        await myCourses().doc(widget.course!.id).update(data); // edit
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      show('Could not save the course: $e');
+    } finally {
+      if (mounted) setState(() => saving = false);
     }
   }
 
@@ -137,8 +141,14 @@ class _CourseScreenState extends State<CourseScreen> {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: save,
-                child: const Text('Save'),
+                onPressed: saving ? null : save,
+                child: saving
+                    ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+                    : const Text('Save'),
               ),
             ),
           ],
