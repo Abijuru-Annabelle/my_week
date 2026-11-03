@@ -1,3 +1,13 @@
+// Session 7 translation table
+// MoMo Wallet        -> My Week
+// Txn, txn.dart      -> Course, course.dart
+// transactions       -> courses
+// TxnRepository      -> CourseRepository
+// WalletState        -> WeekState
+// balance            -> weekMinutes (total of the week)
+// WalletScreen       -> WeekScreen
+// TxnForm            -> CourseScreen
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
