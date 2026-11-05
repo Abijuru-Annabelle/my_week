@@ -1,7 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../repositories/course_repository.dart';
+import '../state/week_state.dart';
 import 'login_screen.dart';
-import 'main.dart';
+import 'week_screen.dart';
 
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -14,10 +17,16 @@ class AuthGate extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        if (snapshot.data == null) {
+        final user = snapshot.data;
+        if (user == null) {
           return const LoginScreen();
         }
-        return const WeekScreen();
+        // Signed in: one brain for this user, given to the week screen.
+        return ChangeNotifierProvider<WeekState>(
+          key: ValueKey(user.uid), // a new user always gets a new brain
+          create: (_) => WeekState(CourseRepository(user.uid)),
+          child: const WeekScreen(),
+        );
       },
     );
   }

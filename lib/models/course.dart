@@ -1,13 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
+// MODEL: says what a course is. It never reads or writes data itself.
 class Course {
-  String id; // the Firestore document id
-  String name;
-  String day;
-  int start; // minutes from midnight, 08:30 = 510
-  int end;
-
   Course({
     this.id = '',
     required this.name,
@@ -16,13 +10,21 @@ class Course {
     required this.end,
   });
 
+  final String id; // the Firestore document id ('' for a new course)
+  final String name;
+  final String day; // 'Mon' ... 'Fri'
+  final int start; // minutes from midnight, 08:30 = 510
+  final int end;
+
+  int get minutes => end - start;
+
   // Only the facts the user typed are saved. Totals and clashes are computed.
   Map<String, dynamic> toMap() => {
-    'name': name,
-    'day': day,
-    'start': start,
-    'end': end,
-  };
+        'name': name,
+        'day': day,
+        'start': start,
+        'end': end,
+      };
 
   factory Course.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data()!;
@@ -36,30 +38,15 @@ class Course {
   }
 }
 
-// The signed-in user's courses: users/{uid}/courses
-CollectionReference<Map<String, dynamic>> myCourses() {
-  final uid = FirebaseAuth.instance.currentUser!.uid;
-  return FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .collection('courses');
-}
+const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
-// Sample data, written once when a new account is created
-Future<void> addSampleCourses() async {
-  final samples = [
-    Course(name: 'Mobile Programming', day: 'Mon', start: 480, end: 600),
-    Course(name: 'Java', day: 'Mon', start: 600, end: 690),
-    Course(name: 'Operating Systems', day: 'Tue', start: 540, end: 660),
-    Course(name: 'Physics', day: 'Tue', start: 630, end: 720),
-    Course(name: 'Web Technology', day: 'Thu', start: 840, end: 960),
-  ];
-  final batch = FirebaseFirestore.instance.batch();
-  for (final c in samples) {
-    batch.set(myCourses().doc(), c.toMap());
-  }
-  await batch.commit();
-}
+const dayNames = {
+  'Mon': 'Monday',
+  'Tue': 'Tuesday',
+  'Wed': 'Wednesday',
+  'Thu': 'Thursday',
+  'Fri': 'Friday',
+};
 
 // "08:30" -> 510, wrong input -> null
 int? parseTime(String text) {

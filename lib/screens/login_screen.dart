@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'course.dart'; // NEW
+import '../repositories/course_repository.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -27,7 +27,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (newAccount) {
         await auth.createUserWithEmailAndPassword(
             email: _email.text.trim(), password: _password.text);
-        await addSampleCourses(); // NEW
+        // The brain does not exist yet at this moment, so we use
+        // the repository directly for the sample data.
+        await CourseRepository(auth.currentUser!.uid).addSamples();
       } else {
         await auth.signInWithEmailAndPassword(
             email: _email.text.trim(), password: _password.text);
@@ -54,6 +56,13 @@ class _LoginScreenState extends State<LoginScreen> {
       default:
         return 'Something went wrong ($code).';
     }
+  }
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
   }
 
   @override
@@ -93,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: const InputDecoration(
                       labelText: 'Password', border: OutlineInputBorder()),
                   validator: (v) =>
-                  (v ?? '').length < 6 ? 'At least 6 characters' : null,
+                      (v ?? '').length < 6 ? 'At least 6 characters' : null,
                 ),
                 const SizedBox(height: 16),
                 if (_error != null)
